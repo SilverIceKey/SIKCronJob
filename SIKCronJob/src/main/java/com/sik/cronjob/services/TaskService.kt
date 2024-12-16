@@ -16,6 +16,7 @@ class TaskService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private var callback: ICronJobCallback? = null
     private var intervalMillis: Long = 0L
+    private val scheduledJobs = mutableMapOf<Int, Runnable>()
 
     private val binder = object : ITaskService.Stub() {
         override fun registerCallback(callback: ICronJobCallback) {
@@ -24,7 +25,18 @@ class TaskService : Service() {
 
         override fun scheduleJob(jobId: Int, intervalMillis: Long, initialDelay: Long) {
             this@TaskService.intervalMillis = intervalMillis
-            handler.postDelayed({ notifyMainProcess(jobId) }, initialDelay)
+            val runnable = Runnable {
+                notifyMainProcess(jobId)
+            }
+            handler.postDelayed(runnable, initialDelay)
+            scheduledJobs[jobId] = runnable
+        }
+
+        override fun cancelJob(jobId: Int) {
+            scheduledJobs[jobId]?.let {
+                handler.removeCallbacks(it)
+                scheduledJobs.remove(jobId)
+            }
         }
     }
 
@@ -33,6 +45,8 @@ class TaskService : Service() {
     private fun notifyMainProcess(jobId: Int) {
         callback?.onJobTriggered(jobId)
         // 重新调度任务
-        handler.postDelayed({ notifyMainProcess(jobId) }, intervalMillis)
+        scheduledJobs[jobId]?.let {
+            handler.postDelayed(it, intervalMillis)
+        }
     }
 }

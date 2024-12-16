@@ -12,4 +12,7 @@ interface ITaskService {
 
     // 启动任务调度
     void scheduleJob(int jobId, long intervalMillis, long initialDelay);
+
+    //取消任务
+    void cancelJob(int jobId);
 }

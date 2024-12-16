@@ -1,7 +1,10 @@
 package com.sik.cronjob.managers
 
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.ServiceConnection
+import android.os.IBinder
 import com.sik.cronjob.ITaskService
 import com.sik.cronjob.annotations.CronJob
 import com.sik.cronjob.services.TaskService
@@ -47,14 +50,15 @@ object CronJobScanner {
         context.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
     }
 
-    private val serviceConnection = object : android.content.ServiceConnection {
-        override fun onServiceConnected(name: android.content.ComponentName?, service: android.os.IBinder?) {
+    private val serviceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
             val taskService = ITaskService.Stub.asInterface(service)
             taskService?.scheduleJob(jobId, intervalMillis, initialDelay)
         }
 
         override fun onServiceDisconnected(name: android.content.ComponentName?) {
             // 处理服务断开连接
+
         }
     }
 
