@@ -10,24 +10,41 @@ import com.sik.cronjob.receivers.CronJobCallback
 import com.sik.cronjob.services.TaskService
 
 /**
- * 管理定时任务的类，负责绑定 TaskService 并通过 AIDL 通信启动任务。
+ * 管理定时任务的类，负责绑定 TaskService 并通过 AIDL 通信自动启动任务。
  */
-class CronJobManager(private val context: Context) {
+class CronJobManager private constructor(private val context: Context) {
 
     private var taskService: ITaskService? = null
-    // 用于存储 jobId 和任务之间的映射，管理当前所有正在调度的任务
-    private val jobIdMap = mutableMapOf<Int, Boolean>() // jobId -> 是否仍在运行
+    private val jobIdMap = mutableMapOf<Int, CronJobScanner.JobInfo>() // jobId -> JobInfo
+    private val pendingJobs = mutableListOf<CronJobScanner.JobInfo>() // 服务未连接时的待调度任务
 
     private val serviceConnection = object : ServiceConnection {
-        // 当服务绑定成功时调用
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
             taskService = ITaskService.Stub.asInterface(service)
             taskService?.registerCallback(CronJobCallback()) // 注册回调
+            // 调度所有待调度的任务
+            synchronized(pendingJobs) {
+                pendingJobs.forEach { job ->
+                    taskService?.scheduleJob(job.jobId, job.intervalMillis, job.initialDelay)
+                    jobIdMap[job.jobId] = job
+                }
+                pendingJobs.clear()
+            }
         }
 
-        // 当服务断开连接时调用
         override fun onServiceDisconnected(name: ComponentName?) {
             taskService = null
+        }
+    }
+
+    companion object {
+        @Volatile
+        private var INSTANCE: CronJobManager? = null
+
+        fun getInstance(context: Context): CronJobManager {
+            return INSTANCE ?: synchronized(this) {
+                INSTANCE ?: CronJobManager(context.applicationContext).also { INSTANCE = it }
+            }
         }
     }
 
@@ -36,7 +53,6 @@ class CronJobManager(private val context: Context) {
      */
     fun bindService() {
         val intent = Intent(context, TaskService::class.java)
-        // 绑定服务，使用 BIND_AUTO_CREATE 标记确保服务启动
         context.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
     }
 
@@ -48,26 +64,43 @@ class CronJobManager(private val context: Context) {
         jobIdMap.keys.forEach { jobId ->
             cancelJob(jobId) // 取消任务
         }
+        jobIdMap.clear()
+        synchronized(pendingJobs) {
+            pendingJobs.clear()
+        }
         context.unbindService(serviceConnection) // 解绑服务
     }
 
     /**
-     * 调度定时任务。
-     * @param jobId 任务唯一标识符
-     * @param intervalMillis 执行间隔（毫秒）
-     * @param initialDelay 初始延迟时间（毫秒）
+     * 注册并调度多个任务。
+     * @param jobs 任务列表
      */
-    fun scheduleJob(jobId: Int, intervalMillis: Long, initialDelay: Long) {
-        taskService?.scheduleJob(jobId, intervalMillis, initialDelay)
-        jobIdMap[jobId] = true // 将任务添加到 jobIdMap 中，表示任务正在运行
+    fun registerJobs(jobs: List<CronJobScanner.JobInfo>) {
+        jobs.forEach { job ->
+            scheduleJob(job)
+        }
+    }
+
+    /**
+     * 调度定时任务。
+     * @param job 任务信息
+     */
+    private fun scheduleJob(job: CronJobScanner.JobInfo) {
+        if (taskService != null) {
+            taskService?.scheduleJob(job.jobId, job.intervalMillis, job.initialDelay)
+            jobIdMap[job.jobId] = job
+        } else {
+            synchronized(pendingJobs) {
+                pendingJobs.add(job)
+            }
+        }
     }
 
     /**
      * 取消指定的任务。
      * @param jobId 任务唯一标识符
      */
-    fun cancelJob(jobId: Int) {
+    private fun cancelJob(jobId: Int) {
         taskService?.cancelJob(jobId)
-        jobIdMap.remove(jobId) // 从 jobIdMap 中移除该任务
     }
 }
