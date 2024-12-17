@@ -22,13 +22,26 @@ class MainActivity : AppCompatActivity() {
             insets
         }
         // 初始化 CronJobManager
-        cronJobManager = CronJobManager(this)
+        cronJobManager = CronJobManager.getInstance(this)
 
+        // 扫描并收集任务信息
+        val jobs = CronJobScanner.scanJobs(MyTask())
+
+        // 注册任务
+        cronJobManager.registerJobs(jobs)
+
+        Log.i("Main","注册完成")
+    }
+
+    override fun onResume() {
+        super.onResume()
         // 绑定服务
         cronJobManager.bindService()
+    }
 
-        // 注册并调度任务
-        CronJobScanner.scanAndRegisterJobs(MyTask(), this)
-        Log.i("Main","注册完成")
+    override fun onPause() {
+        super.onPause()
+        //解绑服务
+        cronJobManager.unbindService()
     }
 }
