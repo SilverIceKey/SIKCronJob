@@ -17,12 +17,13 @@ class CronJobManager private constructor(private val context: Context) {
     private var taskService: ITaskService? = null
     private val jobIdMap = mutableMapOf<Int, CronJobScanner.JobInfo>() // jobId -> JobInfo
     private val pendingJobs = mutableListOf<CronJobScanner.JobInfo>() // 服务未连接时的待调度任务
+    private val cronJobCallback = CronJobCallback() // 单例回调，避免重复注册
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
             taskService = ITaskService.Stub.asInterface(service)
-            taskService?.registerCallback(CronJobCallback()) // 注册回调
-            // 调度所有待调度的任务
+            taskService?.registerCallback(cronJobCallback) // 注册回调
+
             synchronized(pendingJobs) {
                 pendingJobs.forEach { job ->
                     taskService?.scheduleJob(job.jobId, job.intervalMillis, job.initialDelay)
@@ -60,15 +61,14 @@ class CronJobManager private constructor(private val context: Context) {
      * 解绑服务，并取消所有任务。
      */
     fun unbindService() {
-        // 解绑时取消所有已经调度的任务
         jobIdMap.keys.forEach { jobId ->
-            cancelJob(jobId) // 取消任务
+            cancelJob(jobId)
         }
         jobIdMap.clear()
         synchronized(pendingJobs) {
             pendingJobs.clear()
         }
-        context.unbindService(serviceConnection) // 解绑服务
+        context.unbindService(serviceConnection)
     }
 
     /**
@@ -77,7 +77,9 @@ class CronJobManager private constructor(private val context: Context) {
      */
     fun registerJobs(jobs: List<CronJobScanner.JobInfo>) {
         jobs.forEach { job ->
-            scheduleJob(job)
+            if (!jobIdMap.containsKey(job.jobId)) {
+                scheduleJob(job)
+            }
         }
     }
 

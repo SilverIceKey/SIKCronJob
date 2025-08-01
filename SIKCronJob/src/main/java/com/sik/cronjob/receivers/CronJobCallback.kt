@@ -8,36 +8,48 @@ import com.sik.cronjob.managers.CronJobScanner
 import java.lang.reflect.Method
 
 /**
- * 主进程的 AIDL 回调实现，接收到服务端通知时执行相应的任务。
+ * CronJobCallback 是主进程中的 AIDL 回调实现。
+ * 当服务进程触发某个定时任务时，会调用此回调中的 onJobTriggered 方法，
+ * 进而根据 jobId 查找对应的目标方法并执行它。
  */
 class CronJobCallback : ICronJobCallback.Stub() {
 
+    /**
+     * 服务进程触发任务时调用此方法
+     * @param jobId 任务的唯一标识符
+     */
     override fun onJobTriggered(jobId: Int) {
-        // 获取已注册的方法和目标对象
+        // 1. 根据 jobId 查找注册的 method 和其绑定的 target 对象（执行者）
         val method = CronJobScanner.getMethodById(jobId)
         val targetObject = CronJobScanner.getTargetById(jobId)
 
-        // 获取 @CronJob 注解的 runOnMainThread 参数
+        // 2. 读取方法上的 @CronJob 注解，判断是否要求主线程运行
         val cronJob = method?.getAnnotation(CronJob::class.java)
-        val runOnMainThread = cronJob?.runOnMainThread ?: true // 默认在主线程执行
+        val runOnMainThread = cronJob?.runOnMainThread ?: true // 默认主线程执行
 
-        // 如果需要在主线程执行
+        // 3. 根据注解配置切换线程执行方法
         if (runOnMainThread) {
-            // 使用 Handler 切换到主线程执行任务
+            // 主线程执行（如需操作 UI 等）
             Handler(Looper.getMainLooper()).post {
                 invokeMethod(method, targetObject)
             }
         } else {
-            // 在当前线程直接执行
+            // 子线程或当前线程直接执行（适用于后台逻辑）
             invokeMethod(method, targetObject)
         }
     }
 
+    /**
+     * 封装反射调用方法逻辑
+     * @param method 被调用的方法
+     * @param targetObject 方法绑定的目标对象
+     */
     private fun invokeMethod(method: Method?, targetObject: Any?) {
         try {
-            method?.invoke(targetObject) // 通过反射调用无参数的 void 方法
+            method?.invoke(targetObject) // 执行无参数的 void 方法
         } catch (e: Exception) {
             e.printStackTrace()
+            // TODO: 可以考虑上报异常或日志记录
         }
     }
 }
